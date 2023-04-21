@@ -1,11 +1,24 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head>
-  <title>WEB1 - html</title>
-  <mata charset="utf-8">
-</head>
-<body>
-  <h1 class="cmd"><a href="index.html">WEB1</h1>
-  <h2 id="cmd"><a href="index.html">WEB2</h2>
- </body>
+  <head>
+    <meta charset="UTF-8">
+    <title>입력창과 확인 버튼 만들기</title>
+  </head>
+  <body>
+    <form>
+      <label for="input-field">입력창:</label>
+      <input type="text" id="input-field" name="input-field">
+      <button type="button" onclick="displayInput()">확인</button>
+    </form>
+    
+    <div id="output"></div>
+    
+    <script>
+      function displayInput() {
+        var inputField = document.getElementById("input-field");
+        var output = document.getElementById("output");
+        output.innerHTML = "<h1>" + inputField.value + "</h1>";
+      }
+    </script>
+  </body>
 </html>
