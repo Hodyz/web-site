@@ -1,16 +1,341 @@
 <!DOCTYPE html>
-<html>
-  <head>
+<html lang="ko">
+<head>
     <meta charset="UTF-8">
-    <title>입력창과 확인 버튼 만들기</title>
-    <h1>홈페이지 연습</h1>
-  </head>
-  <body>
-    <form method="GET" action="/submit">
-  <label for="input-field">입력창:</label>
-  <input type="text" id="input-field" name="input-field">
-  <button type="submit">확인</button>
-</form>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQTT 웹 컨트롤러</title>
+    <!-- MQTT 클라이언트 라이브러리 (Paho) 로드 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+    <style>
+        /* 기본 스타일 설정 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
 
-  </body>
+        /* 전체 컨테이너 스타일 */
+        .container {
+            background: white;
+            padding: 2rem 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 450px;
+            transition: all 0.3s ease;
+        }
+        
+        /* 제목 스타일 */
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+        }
+
+        /* 폼 그룹 스타일 */
+        .form-group {
+            margin-bottom: 1.2rem;
+        }
+
+        /* 라벨 스타일 */
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #555;
+        }
+
+        /* 입력 필드 스타일 */
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 0.8rem;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        input:focus {
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+            outline: none;
+        }
+
+        /* 버튼 그룹 스타일 */
+        .button-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        /* 모든 버튼에 대한 공통 스타일 */
+        button {
+            padding: 0.9rem;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:disabled {
+            background-color: #adb5bd;
+            cursor: not-allowed;
+        }
+
+        /* 개별 버튼 색상 */
+        #connect-btn { background-color: #007bff; width: 100%; margin-top: 0.5rem; }
+        #connect-btn.connected { background-color: #6c757d; }
+        #on-btn { background-color: #28a745; }
+        #off-btn { background-color: #dc3545; }
+
+        /* 상태 메시지 스타일 */
+        #status {
+            margin-top: 1.5rem;
+            text-align: center;
+            font-weight: 500;
+            color: #555;
+            height: 22px;
+            transition: color 0.3s;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>MQTT 웹 컨트롤러</h2>
+        
+        <!-- 설정 영역 -->
+        <div id="settings">
+            <div class="form-group">
+                <label for="broker-url">MQTT 브로커 주소:</label>
+                <input type="text" id="broker-url" value="test.mosquitto.org">
+            </div>
+            <div class="form-group">
+                <label for="port">WebSocket 포트:</label>
+                <input type="number" id="port" value="8081">
+            </div>
+            <div class="form-group">
+                <label for="topic">Topic 경로:</label>
+                <input type="text" id="topic" value="gemini/web/control">
+            </div>
+            <button id="connect-btn">접속</button>
+        </div>
+        
+        <hr style="margin: 2rem 0; border: 0; border-top: 1px solid #eee;">
+
+        <!-- 제어 버튼 영역 -->
+        <div class="button-group">
+            <button id="on-btn" disabled>ON</button>
+            <button id="off-btn" disabled>OFF</button>
+        </div>
+
+        <!-- 상태 표시 영역 -->
+        <p id="status">연결 대기 중...</p>
+    </div>
+
+    <script>
+        // --- HTML 요소 가져오기 ---
+        const brokerUrlInput = document.getElementById('broker-url');
+        const portInput = document.getElementById('port');
+        const topicInput = document.getElementById('topic');
+        const connectBtn = document.getElementById('connect-btn');
+        const onBtn = document.getElementById('on-btn');
+        const offBtn = document.getElementById('off-btn');
+        const statusDiv = document.getElementById('status');
+
+        let client = null; // MQTT 클라이언트 객체를 저장할 변수
+        let isConnected = false;
+
+        // --- 이벤트 리스너 설정 ---
+
+        // 접속/접속끊기 버튼 클릭 이벤트
+        connectBtn.addEventListener('click', () => {
+            if (isConnected) {
+                disconnectFromBroker();
+            } else {
+                connectToBroker();
+            }
+        });
+
+        // ON 버튼 클릭 이벤트
+        onBtn.addEventListener('click', () => publishMessage('1'));
+
+        // OFF 버튼 클릭 이벤트
+        offBtn.addEventListener('click', () => publishMessage('0'));
+
+        // --- MQTT 관련 함수 ---
+
+        /**
+         * MQTT 브로커에 접속을 시도하는 함수
+         */
+        function connectToBroker() {
+            const broker = brokerUrlInput.value.trim();
+            const port = Number(portInput.value);
+            const clientId = "web_" + Math.random().toString(16).substr(2, 8); // 고유한 클라이언트 ID 생성
+
+            if (!broker || !port) {
+                updateStatus("브로커 주소와 포트를 입력하세요.", "error");
+                return;
+            }
+
+            // Paho MQTT 클라이언트 객체 생성
+            client = new Paho.Client(broker, port, clientId);
+
+            // 콜백 함수 할당
+            client.onConnectionLost = onConnectionLost;
+            client.onMessageArrived = onMessageArrived;
+
+            updateStatus("브로커에 접속 중...", "connecting");
+
+            // 브로커 접속 시도
+            client.connect({
+                timeout: 10,
+                useSSL: port === 8081 || port === 443, // test.mosquitto.org:8081은 SSL(WSS) 사용
+                onSuccess: onConnect,
+                onFailure: onFailure,
+                reconnect: true
+            });
+        }
+
+        /**
+         * 브로커로부터 접속을 끊는 함수
+         */
+        function disconnectFromBroker() {
+            if (client && isConnected) {
+                client.disconnect();
+                // onConnectionLost가 자동으로 호출되면서 UI가 정리됩니다.
+            }
+        }
+
+        /**
+         * 접속 성공 시 호출될 콜백 함수
+         */
+        function onConnect() {
+            isConnected = true;
+            updateStatus("✅ 접속 성공!", "success");
+            console.log("MQTT 브로커에 성공적으로 접속했습니다.");
+            
+            // UI 상태 업데이트
+            connectBtn.textContent = '접속 끊기';
+            connectBtn.classList.add('connected');
+            toggleControlUI(true);
+        }
+
+        /**
+         * 접속 실패 시 호출될 콜백 함수
+         */
+        function onFailure(response) {
+            isConnected = false;
+            updateStatus(`❌ 접속 실패: ${response.errorMessage}`, "error");
+            console.error(`MQTT 접속 실패: ${response.errorMessage}`);
+            toggleControlUI(false);
+        }
+
+        /**
+         * 연결이 끊겼을 때 호출될 콜백 함수
+         */
+        function onConnectionLost(responseObject) {
+            isConnected = false;
+            if (responseObject.errorCode !== 0) {
+                updateStatus(`🔌 연결이 끊겼습니다: ${responseObject.errorMessage}`, "error");
+                console.log(`MQTT 연결 끊김: ${responseObject.errorMessage}`);
+            } else {
+                updateStatus("연결이 종료되었습니다.", "disconnected");
+                console.log("MQTT 연결이 정상적으로 종료되었습니다.");
+            }
+
+            // UI 상태 업데이트
+            connectBtn.textContent = '접속';
+            connectBtn.classList.remove('connected');
+            toggleControlUI(false);
+        }
+
+        /**
+         * 메시지 수신 시 호출될 콜백 함수 (이 예제에서는 사용하지 않음)
+         */
+        function onMessageArrived(message) {
+            console.log(`메시지 수신 - Topic: ${message.destinationName}, Payload: ${message.payloadString}`);
+        }
+
+        /**
+         * 메시지를 발행(Publish)하는 함수
+         * @param {string} payload - 발행할 메시지 내용
+         */
+        function publishMessage(payload) {
+            if (!isConnected) {
+                updateStatus("⚠️ 먼저 브로커에 접속하세요.", "error");
+                return;
+            }
+            const topic = topicInput.value.trim();
+            if (!topic) {
+                updateStatus("⚠️ Topic 경로를 입력하세요.", "error");
+                return;
+            }
+
+            // Paho 메시지 객체 생성
+            const message = new Paho.Message(payload);
+            message.destinationName = topic;
+            message.qos = 0; // Quality of Service Level
+
+            try {
+                client.send(message);
+                updateStatus(`✔️ Topic [${topic}]으로 값 [${payload}] 발행 완료`, "success");
+                console.log(`Published '${payload}' to topic '${topic}'`);
+            } catch (error) {
+                updateStatus(`❌ 발행 실패: ${error.message}`, "error");
+                console.error(`메시지 발행 실패: `, error);
+            }
+        }
+        
+        // --- UI 헬퍼 함수 ---
+
+        /**
+         * 상태 메시지와 색상을 업데이트하는 함수
+         * @param {string} text - 표시할 메시지
+         * @param {string} type - 메시지 종류 (success, error, connecting, disconnected)
+         */
+        function updateStatus(text, type) {
+            statusDiv.textContent = text;
+            switch (type) {
+                case 'success':
+                    statusDiv.style.color = '#28a745';
+                    break;
+                case 'error':
+                    statusDiv.style.color = '#dc3545';
+                    break;
+                case 'connecting':
+                    statusDiv.style.color = '#007bff';
+                    break;
+                default:
+                    statusDiv.style.color = '#555';
+            }
+        }
+
+        /**
+         * 제어 관련 UI(버튼, 입력 필드)를 활성화/비활성화하는 함수
+         * @param {boolean} enable - 활성화 여부
+         */
+        function toggleControlUI(enable) {
+            onBtn.disabled = !enable;
+            offBtn.disabled = !enable;
+            brokerUrlInput.disabled = enable;
+            portInput.disabled = enable;
+            topicInput.disabled = enable;
+        }
+
+    </script>
+</body>
 </html>
